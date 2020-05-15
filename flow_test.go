@@ -32,6 +32,7 @@ func TestCertificationFlowUsingSampleCert(t *testing.T) {
 	s := NewNodeStorage("sample_machine")
 
 	// phase 1
+	// the Miner(m) request a cert from the Validator(v)
 	mReq, err := m.RegisterSampleCert()
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -45,6 +46,8 @@ func TestCertificationFlowUsingSampleCert(t *testing.T) {
 	}
 
 	// phase 2
+	// the Storage(s) request a cert from the Miner(m)
+	// and Miner(m) notify this cert response to the Validator(v)
 	sReq, err := s.RegisterSampleCert()
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -61,6 +64,8 @@ func TestCertificationFlowUsingSampleCert(t *testing.T) {
 	}
 
 	// phase 3
+	// the Storage(s) commit some business data to the Miner(m)
+	// and the Miner(m) pack the data up and give it to the Validator(v)
 	data, sCert := s.MockCommitData()
 	mCert, err := m.PackStorageCommit(data, sCert)
 	if err != nil {
