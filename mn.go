@@ -11,23 +11,30 @@ import (
 )
 
 type NodeMiner struct {
-	Name         string
-	Sk           ed25519.PrivateKey
-	Intermediate *x509.Certificate
+	Name              string
+	Sk                ed25519.PrivateKey
+	Pk                ed25519.PublicKey
+	Intermediate      *x509.Certificate
+	SampleCerts       *SampleCertPool
+	SampleCertEndTime time.Time
 }
 
 // factory
 func NewNodeMiner(name string) *NodeMiner {
-	_, sk, err := ed25519.GenerateKey(rand.Reader)
+	pk, sk, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		panic(err)
 	}
 
 	return &NodeMiner{
-		Name: name,
-		Sk:   sk,
+		Name:        name,
+		Sk:          sk,
+		Pk:          pk,
+		SampleCerts: NewSampleCertPool(),
 	}
 }
+
+// ---------------------- X509 ----------------------- //
 
 func templateMinerReq(mn *NodeMiner) *x509.CertificateRequest {
 	return &x509.CertificateRequest{
@@ -85,4 +92,50 @@ func (mn *NodeMiner) HandleCertReq(csr *x509.CertificateRequest) (*x509.Certific
 	}
 
 	return x509.ParseCertificate(cBytes)
+}
+
+// -------------------------- SampleCert ------------------------------- //
+
+func (mn *NodeMiner) RegisterSampleCert() (*SampleCertRequest, error) {
+	return CreateSampleCertRequest(24*time.Hour, mn.Sk)
+}
+
+func (mn *NodeMiner) HandleSampleCertRes(sc *SampleCert) error {
+	if err := sc.VerifyHeadCertification(mn.Pk, time.Now()); err != nil {
+		return err
+	}
+	mn.SampleCertEndTime = sc.GetHeadCertification().notAfter
+
+	return nil
+}
+
+func (mn *NodeMiner) HandleStorageSampleCertReq(scr *SampleCertRequest) (*SampleCert, *SampleCertNotify, error) {
+	if err := scr.Verify(); err != nil {
+		return nil, nil, err
+	}
+
+	endTime := time.Now().Add(scr.Duration)
+	cert, err := ChainSign(nil, []byte(scr.PubKey), mn.Sk, endTime)
+	if err != nil {
+		return nil, nil, err
+	}
+	mn.SampleCerts.Add(scr.PubKey, endTime)
+
+	// pack single notify in this demo for simplicity
+	notify, err := CreateSampleCertNotify(endTime, []ed25519.PublicKey{scr.PubKey}, mn.Sk)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return cert, notify, nil
+}
+
+func (mn *NodeMiner) PackStorageCommit(storageCommitData []byte, storageCert *SampleCert) (*SampleCert, error) {
+	opt := mn.SampleCerts.GetSampleCertOpt()
+
+	if err := ChainVerify(storageCert, opt, storageCommitData); err != nil {
+		return nil, fmt.Errorf("failed to verify storage cert: %s", err.Error())
+	}
+
+	return ChainSign(storageCert, storageCommitData, mn.Sk, mn.SampleCertEndTime)
 }
